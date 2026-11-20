@@ -122,16 +122,6 @@ On the free plan the service sleeps after about 15 minutes without visitors, so 
 | `MOCK_MODE` | `false` | `true` forces demo mode |
 | `INFO_AGENT_BASE_URL`, `INFO_AGENT_API_KEY`, `ANALYSIS_AGENT_BASE_URL`, `ANALYSIS_AGENT_API_KEY` | (shared values) | Optional per-agent provider settings |
 
-## Design notes
-
-- **Rule compliance is never shown to users.** The APPROVED / CORRECTION_REQUIRED status and the issues found are logged on the server only, and a final filter removes any sentence about rules or compliance from the answer.
-- **The Analysis Agent can't search.** It corrects answers using only the Info Agent's sources, and citations to sources that don't exist are removed.
-- **Evidence accuracy:** the Analysis Agent checks that every claim is supported by the source it cites and matches what that source says, and removes claims that aren't in the sources (in both the answer and the opinion). These checks are labelled R1/R2.
-- **Source quality (R3):** the Info Agent prefers official sources and established news outlets over commercial and product pages, and the Analysis Agent moves citations to the better source where both support a claim.
-- **No uncertainty disclaimers from the Info Agent**, as the product plan specifies.
-- **Prompt injection:** both agents treat retrieved web content as evidence only and ignore instructions inside it.
-- **Server log:** each question prints one line, for example `status=APPROVED sources=5 info=5800ms analysis=2200ms`, followed by the issues found when a correction was made.
-
 ## Tests
 
 ```bash
