@@ -116,7 +116,7 @@ On the free plan the service sleeps after about 15 minutes without visitors, so 
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `RATE_LIMIT_PER_HOUR` | `30` | Questions allowed per visitor IP per hour |
+| `RATE_LIMIT_PER_HOUR` | `10` | Questions allowed per visitor IP per hour |
 | `SEARCH_MAX_RESULTS` | `6` | Search results passed to the Info Agent |
 | `EXPOSE_TRACE` | `false` | `true` adds the internal trace (Info Agent draft, APPROVED / CORRECTION_REQUIRED, issues, timings) to API responses. Keep `false` for real users. |
 | `MOCK_MODE` | `false` | `true` forces demo mode |
