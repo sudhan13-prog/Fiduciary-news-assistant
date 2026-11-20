@@ -1,0 +1,17 @@
+{
+  "name": "llm-mafs-backend",
+  "version": "0.1.0",
+  "description": "LLM-MAFS: two-agent fiduciary news assistant backend (Info Agent + Analysis Agent)",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
+  }
+}
