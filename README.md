@@ -1,74 +1,140 @@
 # Fiduciary News Assistant (LLM-MAFS prototype)
 
-A two-agent fiduciary news system, built from *Product Plan Iteration-1*.
+An interactive multi-agent fiduciary system for news questions. Two LLM agents share one **fiduciary rulebook**: the **Info Agent** retrieves news and drafts an answer, and the **Analysis Agent** checks the draft against the rulebook and corrects it before the user sees it.
 
 ```
 User query
    │
    ▼
-Agent 1 - Info Agent (gpt-oss-20b)
+Agent 1 - Info Agent (gpt-oss-20b on Groq)
    1. reads the fiduciary rulebook
-   2. plans retrieval (understands the query, follows the user's instructions)
+   2. understands the query and plans the search (prefers official sources and established news outlets)
    3. searches the web with Tavily
-   4. drafts a short answer + separate opinion, citing sources as [n]
-   │   structured message: INFO_AGENT_RESPONSE { originalQuery, response, sources }   (R5 checked)
+   4. drafts a short answer + a separate opinion, citing sources as [n]
+   │   structured message: INFO_AGENT_RESPONSE { originalQuery, response, sources }   (R5 integrity check)
    ▼
-Agent 2 - Analysis Agent (Qwen)
+Agent 2 - Analysis Agent (qwen3.8-27b on Groq)
    1. reads the same rulebook
-   2. checks compliance → APPROVED | CORRECTION_REQUIRED (internal only)
-   3. APPROVED → Agent 1's answer passes through unchanged
+   2. checks compliance → APPROVED | CORRECTION_REQUIRED (internal only, logged on the server)
+   3. APPROVED → the Info Agent's answer passes through unchanged
       CORRECTION_REQUIRED → minimal correction using only the existing sources (no new search)
    │
    ▼
-Final answer + clickable sources → React UI
+Final answer + AI's opinion + clickable sources → React UI
 ```
+
+## Fiduciary rulebook
+
+| ID | Rule | Behaviour |
+|---|---|---|
+| R1 | User Interest Priority | Prioritise the user's interests when retrieving, analysing and presenting information. |
+| R2 | User Goal Alignment | Understand the user's query and generate responses that align with the user's information requirements and serve the user's information needs. |
+| R3 | No Conflicting Interests | Do not favour third-party interests and do not allow these interests to influence the selection, interpretation or presentation of information. |
+| R4 | Instruction Adherence | Follow the user's instructions when generating responses. |
+| R5 | Communication Integrity | Information exchanged between agents must preserve the original user query, generated response and relevant source references. |
+
+The rulebook is defined once in `backend/src/rulebook.js` and is read by both agents.
+
+## Tech stack
+
+| Component | Technology |
+|---|---|
+| Frontend | React (Vite) |
+| Backend | Node.js (Express), REST API (JSON) |
+| Info Agent | `openai/gpt-oss-20b` via Groq |
+| Analysis Agent | `qwen/qwen3.8-27b` via Groq |
+| Web search | Tavily API |
 
 ## Project layout
 
 | Path | Purpose |
 |---|---|
-| `backend/src/rulebook.js` | The shared fiduciary rulebook (R1–R5), read by both agents |
+| `backend/src/rulebook.js` | Shared fiduciary rulebook (R1–R5) |
 | `backend/src/agents/infoAgent.js` | Agent 1: plan, search, draft |
 | `backend/src/agents/analysisAgent.js` | Agent 2: verify, approve or correct |
 | `backend/src/protocol.js` | Agent-to-agent message envelopes and R5 integrity checks |
 | `backend/src/search.js` | Tavily search |
-| `backend/src/llm.js` | OpenAI-compatible chat client (OpenRouter, Groq, Together, vLLM, Ollama…) |
+| `backend/src/llm.js` | OpenAI-compatible chat client (Groq, OpenRouter, Together, vLLM, Ollama…) |
 | `backend/src/orchestrator.js` | Runs the pipeline and keeps conversation context for follow-up questions |
-| `backend/src/server.js` | REST API: `POST /api/ask`, `POST /api/reset`, `GET /api/health`, `GET /api/rulebook` |
-| `frontend/src/App.jsx` | The chat-style React UI |
+| `backend/src/server.js` | REST API, per-IP rate limit, and serves the built UI in production |
+| `frontend/src/App.jsx` | Chat-style React UI |
 
-## Setup
+API endpoints: `POST /api/ask`, `POST /api/reset`, `GET /api/health`, `GET /api/rulebook`.
 
-Requires Node.js 18 or later.
+## Run locally
+
+Requires Node.js 18 or later. On Windows PowerShell, use `npm.cmd` if `npm` is blocked.
 
 1. Copy `backend/.env.example` to `backend/.env` and fill in:
-   - `TAVILY_API_KEY`
-   - `LLM_API_KEY` (and `LLM_BASE_URL` if you aren't using OpenRouter)
-   - `INFO_AGENT_MODEL` / `ANALYSIS_AGENT_MODEL`: the exact model IDs your provider uses. Set the Qwen ID to the model you picked for the Analysis Agent.
-   - Each agent can use a different provider (`INFO_AGENT_BASE_URL`, `ANALYSIS_AGENT_API_KEY`, …).
-2. Install and run:
 
-```powershell
-cd backend; npm install; npm start
+   ```ini
+   TAVILY_API_KEY=your-tavily-key
+   LLM_BASE_URL=https://api.groq.com/openai/v1
+   LLM_API_KEY=your-groq-key
+   INFO_AGENT_MODEL=openai/gpt-oss-20b
+   ANALYSIS_AGENT_MODEL=qwen/qwen3.8-27b
+   ```
+
+   Never commit `.env`; it is listed in `.gitignore`.
+
+2. Install everything once (from the project's top folder):
+
+   ```bash
+   npm run install:all
+   ```
+
+3. Start the backend and frontend together in one terminal:
+
+   ```bash
+   npm start
+   ```
+
+4. Open http://localhost:5173.
+
+Without API keys the backend runs in **demo mode** (placeholder search results and answers), so you can still try the UI.
+
+### Production build (one server for UI + API)
+
+```bash
+npm run build
+npm --prefix backend start
 ```
 
-```powershell
-cd frontend; npm install; npm run dev
-```
+Then open http://localhost:8787.
 
-3. Open http://localhost:5173.
+## Deploy on Render
 
-Without API keys the backend runs in **demo mode** (placeholder search results and answers) so you can try the UI.
+1. Push this repository to GitHub.
+2. On https://render.com create a **Web Service** from the repository:
+   - **Build Command:** `npm run build`
+   - **Start Command:** `npm --prefix backend start`
+3. Add environment variables: `TAVILY_API_KEY`, `LLM_BASE_URL`, `LLM_API_KEY`, `INFO_AGENT_MODEL`, `ANALYSIS_AGENT_MODEL`, and `NODE_VERSION=22`. Don't set `PORT`; Render provides it.
 
-## Notes on the plan's requirements
+On the free plan the service sleeps after about 15 minutes without visitors, so the first request afterwards can take up to a minute.
 
-- **Rules not disclosed to the user:** the APPROVED / CORRECTION_REQUIRED status and the list of issues are logged on the server only. A final filter also removes any sentence mentioning rules or compliance from the user-facing text. Set `EXPOSE_TRACE=true` to get the full trace (draft vs. final answer, issues, timings) in API responses for research and evaluation.
-- **No new retrieval in Agent 2:** the Analysis Agent has no search tool. Citations to sources that don't exist are removed.
-- **No uncertainty disclaimers from Agent 1:** this is in its system prompt, as the plan specifies.
-- **Prompt injection:** both agents are told to treat retrieved web content as evidence only and to ignore instructions inside it (R3).
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `RATE_LIMIT_PER_HOUR` | `30` | Questions allowed per visitor IP per hour |
+| `SEARCH_MAX_RESULTS` | `6` | Search results passed to the Info Agent |
+| `EXPOSE_TRACE` | `false` | `true` adds the internal trace (Info Agent draft, APPROVED / CORRECTION_REQUIRED, issues, timings) to API responses. Keep `false` for real users. |
+| `MOCK_MODE` | `false` | `true` forces demo mode |
+| `INFO_AGENT_BASE_URL`, `INFO_AGENT_API_KEY`, `ANALYSIS_AGENT_BASE_URL`, `ANALYSIS_AGENT_API_KEY` | (shared values) | Optional per-agent provider settings |
+
+## Design notes
+
+- **Rule compliance is never shown to users.** The APPROVED / CORRECTION_REQUIRED status and the issues found are logged on the server only, and a final filter removes any sentence about rules or compliance from the answer.
+- **The Analysis Agent can't search.** It corrects answers using only the Info Agent's sources, and citations to sources that don't exist are removed.
+- **Evidence accuracy:** the Analysis Agent checks that every claim is supported by the source it cites and matches what that source says, and removes claims that aren't in the sources (in both the answer and the opinion). These checks are labelled R1/R2.
+- **Source quality (R3):** the Info Agent prefers official sources and established news outlets over commercial and product pages, and the Analysis Agent moves citations to the better source where both support a claim.
+- **No uncertainty disclaimers from the Info Agent**, as the product plan specifies.
+- **Prompt injection:** both agents treat retrieved web content as evidence only and ignore instructions inside it.
+- **Server log:** each question prints one line, for example `status=APPROVED sources=5 info=5800ms analysis=2200ms`, followed by the issues found when a correction was made.
 
 ## Tests
 
-```powershell
-cd backend; npm test
+```bash
+cd backend
+npm test
 ```
