@@ -55,7 +55,7 @@ The rulebook is defined once in `backend/src/rulebook.js` and is read by both ag
 | `backend/src/agents/infoAgent.js` | Agent 1: plan, search, draft |
 | `backend/src/agents/analysisAgent.js` | Agent 2: verify, approve or correct |
 | `backend/src/protocol.js` | Agent-to-agent message envelopes and R5 integrity checks |
-| `backend/src/search.js` | Four-engine search: parallel calls, timeouts, duplicate removal, ranking |
+| `backend/src/search.js` | Three-engine search: parallel calls, timeouts, duplicate removal, ranking |
 | `backend/src/llm.js` | OpenAI-compatible chat client (Groq, OpenRouter, Together, vLLM, Ollama…) |
 | `backend/src/orchestrator.js` | Runs the pipeline and keeps conversation context for follow-up questions |
 | `backend/src/server.js` | REST API, per-IP rate limit, and serves the built UI in production |
@@ -93,18 +93,20 @@ Requires Node.js 18 or later. On Windows PowerShell, use `npm.cmd` if `npm` is b
    npm start
    ```
 
-4. Open http://localhost:5173.
+4. Open the app in your browser: **http://localhost:5173**
 
 Without API keys the backend runs in **demo mode** (placeholder search results and answers), so you can still try the UI.
 
-### Production build (one server for UI + API)
+## Production build (optional)
+
+Use this to test the app the way it runs on Render: the backend serves both the UI and the API from one server.
 
 ```bash
 npm run build
 npm --prefix backend start
 ```
 
-Then open http://localhost:8787.
+Then open **http://localhost:8787**
 
 ## Deploy on Render
 
@@ -133,7 +135,7 @@ On the free plan the service sleeps after about 15 minutes without visitors, so 
 ## How the search works
 
 - Every engine with a key in `.env` runs in parallel; an engine without a key is skipped.
-- Tavily, Serper and Brave each get all of the Info Agent's search queries (up to 3). Brave's free plan allows about 1 request per second, so its queries run about 1 second apart.
+- Tavily, Serper and Brave each get all of the Info Agent's search queries (up to 3).
 - Social media results are removed, and results are merged with duplicate URLs removed. The top `SEARCH_CANDIDATES` (20), in the engines' own order, go to the Info Agent.
 - The Info Agent chooses up to `SEARCH_MAX_RESULTS` (10) of them that best answer the question, prioritising primary sources and official websites and ignoring social media and individual blogs or posts, most important first. It writes the answer only from the chosen sources, and the Analysis Agent checks against the same sources. If choosing fails, the top 10 candidates are used.
 - An engine that fails or takes longer than `SEARCH_TIMEOUT_MS` is skipped, and the answer uses the others.
