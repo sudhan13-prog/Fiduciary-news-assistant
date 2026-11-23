@@ -43,15 +43,29 @@ app.post('/api/ask', rateLimit, async (req, res) => {
   if (!query) return res.status(400).json({ error: 'Please enter a news-related question.' });
   if (query.length > 2000) return res.status(400).json({ error: 'Query is too long (max 2000 characters).' });
 
+  // Stream newline-delimited JSON so the UI can show each agent's real progress:
+  //   {"type":"stage","stage":"searching"} ... {"type":"result",...} or {"type":"error",...}
+  res.status(200);
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  const send = (obj) => res.write(`${JSON.stringify(obj)}\n`);
+
   try {
-    const result = await handleQuery({ conversationId: req.body.conversationId, query });
-    const body = { conversationId: result.conversationId, response: result.response, sources: result.sources };
+    const result = await handleQuery({
+      conversationId: req.body.conversationId,
+      query,
+      onStage: (stage) => send({ type: 'stage', stage }),
+    });
+    const body = { type: 'result', conversationId: result.conversationId, response: result.response, sources: result.sources };
     if (config.exposeTrace) body.trace = result.trace;
-    res.json(body);
+    send(body);
   } catch (err) {
     console.error('ask failed:', err);
-    res.status(502).json({ error: 'The assistant could not complete your request. Please try again.' });
+    send({ type: 'error', error: 'The assistant could not complete your request. Please try again.' });
   }
+  res.end();
 });
 
 app.post('/api/reset', (req, res) => {

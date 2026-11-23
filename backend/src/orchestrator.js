@@ -7,18 +7,21 @@ const conversations = new Map(); // conversationId -> { history: [], updatedAt }
 const MAX_TURNS = 10;
 const TTL_MS = 6 * 60 * 60 * 1000;
 
-export async function handleQuery({ conversationId, query }) {
+// onStage(stage) reports progress to the UI: 'searching' -> 'drafting' -> 'evaluating' -> 'finalising'
+export async function handleQuery({ conversationId, query, onStage = () => {} }) {
   conversationId = conversations.has(conversationId) ? conversationId : randomUUID();
   const convo = conversations.get(conversationId) || { history: [] };
   const started = Date.now();
 
   // Agent 1 -> structured message -> Agent 2
-  const infoEnvelope = await runInfoAgent({ conversationId, query, history: convo.history });
+  const infoEnvelope = await runInfoAgent({ conversationId, query, history: convo.history, onStage });
   const t1 = Date.now();
+  onStage('evaluating');
   const analysisEnvelope = await runAnalysisAgent(infoEnvelope);
   const t2 = Date.now();
+  onStage('finalising');
 
-  const { finalResponse, sources, status, issues } = analysisEnvelope.payload;
+  const { finalResponse, sources, status, issues, dateCheck } = analysisEnvelope.payload;
 
   convo.history.push({ query, title: finalResponse.title, answer: finalResponse.answer });
   convo.history = convo.history.slice(-MAX_TURNS);
@@ -30,17 +33,15 @@ export async function handleQuery({ conversationId, query }) {
     infoMessageId: infoEnvelope.messageId,
     analysisMessageId: analysisEnvelope.messageId,
     searchQueries: infoEnvelope.payload.searchQueries,
-    sourcesRetrieved: infoEnvelope.payload.sources.length,
+    searchEngines: infoEnvelope.payload.searchStats,
+    candidatesFound: infoEnvelope.payload.candidatesFound,
+    sourcesChosen: infoEnvelope.payload.sources.length,
     analysisStatus: status,
     issues,
+    dateCheck,
     draftResponse: infoEnvelope.payload.response,
     timingsMs: { infoAgent: t1 - started, analysisAgent: t2 - t1 },
   };
-  console.log(
-    `[${new Date().toISOString()}] conv=${conversationId.slice(0, 8)} status=${status} sources=${sources.length} ` +
-      `info=${trace.timingsMs.infoAgent}ms analysis=${trace.timingsMs.analysisAgent}ms` +
-      (issues.length ? ` issues=${JSON.stringify(issues)}` : ''),
-  );
 
   return { conversationId, response: finalResponse, sources, trace };
 }

@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 
-const STAGES = [
-  'Info Agent is reading the rulebook and understanding your question…',
-  'Info Agent is searching the web for sources…',
-  'Info Agent is drafting a response…',
-  'Analysis Agent is verifying the response…',
-];
+// Progress messages, driven by the real stage the backend reports.
+const STAGES = {
+  searching: 'Info Agent is searching the web…',
+  drafting: 'Info Agent is writing a detailed response…',
+  evaluating: 'Analysis Agent is evaluating the response…',
+  finalising: 'Your answer is on the way…',
+};
 
 export default function App() {
   const [query, setQuery] = useState('');
   const [turns, setTurns] = useState([]); // { query, response?, sources?, error? }
   const [loading, setLoading] = useState(false);
-  const [stage, setStage] = useState(0);
+  const [stage, setStage] = useState('searching');
   const [conversationId, setConversationId] = useState(null);
   const [health, setHealth] = useState(null);
   const bottomRef = useRef(null);
@@ -27,17 +28,11 @@ export default function App() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [turns, loading]);
 
-  useEffect(() => {
-    if (!loading) return;
-    setStage(0);
-    const timers = [2500, 7000, 14000].map((ms, i) => setTimeout(() => setStage(i + 1), ms));
-    return () => timers.forEach(clearTimeout);
-  }, [loading]);
-
   async function ask() {
     const q = query.trim();
     if (!q || loading) return;
     setQuery('');
+    setStage('searching');
     setLoading(true);
     setTurns((t) => [...t, { query: q }]);
     try {
@@ -46,8 +41,11 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: q, conversationId }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Request failed (${res.status})`);
+      }
+      const data = await readStream(res, setStage);
       setConversationId(data.conversationId);
       setTurns((t) => replaceLast(t, { query: q, response: data.response, sources: data.sources }));
     } catch (err) {
@@ -97,7 +95,7 @@ export default function App() {
           {loading && (
             <div className="card loading-card" role="status" aria-live="polite">
               <span className="spinner" />
-              <span>{STAGES[stage]}</span>
+              <span>{STAGES[stage] || STAGES.searching}</span>
             </div>
           )}
           <div ref={bottomRef} />
@@ -137,7 +135,7 @@ function ResponseCard({ response, sources = [] }) {
       <FormattedText text={response.answer} byId={byId} />
       {response.opinion && (
         <section className="opinion">
-          <h3>AI's opinion</h3>
+          <h3>My Opinion</h3>
           <FormattedText text={response.opinion} byId={byId} />
         </section>
       )}
@@ -159,22 +157,68 @@ function ResponseCard({ response, sources = [] }) {
   );
 }
 
-/** Renders paragraphs and "- " bullets, turning [n] citations into links. */
+const BULLET = /^\s*[-•*]\s+/;
+const NUMBERED = /^\s*\d+[.)]\s+/;
+const HEADING = /^\s*#{1,6}\s+/;
+
+/** Renders "### " headings, paragraphs, "- " / "1." lists and **bold**, turning [n] citations into links. */
 function FormattedText({ text, byId }) {
-  const blocks = String(text || '').split(/\n{2,}/);
-  return blocks.map((block, bi) => {
-    const lines = block.split('\n').filter(Boolean);
-    if (lines.length && lines.every((l) => /^\s*[-•*]\s+/.test(l))) {
-      return (
-        <ul key={bi}>
-          {lines.map((l, li) => (
-            <li key={li}>{withCitations(l.replace(/^\s*[-•*]\s+/, ''), byId)}</li>
+  const out = [];
+  let para = [];
+  let list = null; // { ordered, items }
+
+  const flushPara = () => {
+    if (para.length) out.push(<p key={out.length}>{inline(para.join(' '), byId)}</p>);
+    para = [];
+  };
+  const flushList = () => {
+    if (list) {
+      const Tag = list.ordered ? 'ol' : 'ul';
+      out.push(
+        <Tag key={out.length} className="answer-list">
+          {list.items.map((item, i) => (
+            <li key={i}>{inline(item, byId)}</li>
           ))}
-        </ul>
+        </Tag>,
       );
     }
-    return <p key={bi}>{withCitations(lines.join(' '), byId)}</p>;
-  });
+    list = null;
+  };
+
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.trim();
+    if (!line) {
+      flushPara();
+      flushList();
+    } else if (HEADING.test(line)) {
+      flushPara();
+      flushList();
+      out.push(<h4 key={out.length}>{inline(line.replace(HEADING, '').replace(/\*\*/g, ''), byId)}</h4>);
+    } else if (BULLET.test(line) || NUMBERED.test(line)) {
+      flushPara();
+      const ordered = NUMBERED.test(line);
+      if (list && list.ordered !== ordered) flushList();
+      list ||= { ordered, items: [] };
+      list.items.push(line.replace(ordered ? NUMBERED : BULLET, ''));
+    } else {
+      flushList();
+      para.push(line);
+    }
+  }
+  flushPara();
+  flushList();
+  return out;
+}
+
+/** Handles **bold** and [n] citation links inside a line. */
+function inline(text, byId) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((chunk, ci) =>
+    /^\*\*[^*]+\*\*$/.test(chunk) ? (
+      <strong key={ci}>{withCitations(chunk.slice(2, -2), byId)}</strong>
+    ) : (
+      <span key={ci}>{withCitations(chunk, byId)}</span>
+    ),
+  );
 }
 
 function withCitations(text, byId) {
@@ -189,6 +233,34 @@ function withCitations(text, byId) {
       part
     );
   });
+}
+
+/** Reads the backend's newline-delimited JSON stream: stage updates, then the result (or an error). */
+async function readStream(res, onStage) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result = null;
+
+  const handle = (line) => {
+    if (!line.trim()) return;
+    const msg = JSON.parse(line);
+    if (msg.type === 'stage') onStage(msg.stage);
+    else if (msg.type === 'error') throw new Error(msg.error);
+    else if (msg.type === 'result') result = msg;
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    lines.forEach(handle);
+  }
+  handle(buffer);
+  if (!result) throw new Error('The connection closed before the answer arrived. Please try again.');
+  return result;
 }
 
 function replaceLast(arr, item) {
